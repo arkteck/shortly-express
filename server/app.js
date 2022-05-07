@@ -15,18 +15,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(parseCookies);
+app.use(Auth.createSession);
 
 
-
-app.get('/', (req, res) => {
+app.get('/', Auth.verifySession, (req, res) => {
   res.render('index');
 });
 
-app.get('/create', (req, res) => {
+app.get('/create', Auth.verifySession, (req, res) => {
   res.render('index');
 });
 
-app.get('/links', (req, res, next) => {
+app.get('/links', Auth.verifySession, (req, res, next) => {
   models.Links.getAll()
     .then(links => {
       res.status(200).send(links);
@@ -75,21 +75,32 @@ app.post('/links', (req, res, next) => {
 // Write your authentication routes here
 /************************************************************/
 
-
+app.get('/signup', (req, res) => {
+  res.render('signup');
+});
 
 app.post('/signup', (req, res) => {
   var username = req.body.username;
   var password = req.body.password;
   return models.Users.create({username, password})
     .then(data => {
+      req.session.user = {username};
+      req.session.userId = data.insertId;
+      return models.Sessions.update({hash: req.session.hash}, {userId: data.insertId});
+    })
+    .then (() => {
       res.redirect('/');
       res.end();
-    }).catch(err => {
-      console.log(err);
+    })
+    .catch(err => {
+      // console.log(err);
       res.redirect('/signup');
       res.end();
-      // throw err;
     });
+});
+
+app.get('/login', (req, res) => {
+  res.render('login');
 });
 
 app.post('/login', (req, res) => {
@@ -102,16 +113,38 @@ app.post('/login', (req, res) => {
       } else {
         var stored = models.Users.compare(password, data.password, data.salt);
         if (stored) {
-          console.log('Login successful');
-          res.redirect('/');
+          req.session.user = {username};
+          req.session.userId = data.id;
+
+          return models.Sessions.update({hash: req.session.hash}, {userId: data.id})
+            .then(() => {
+              res.redirect('/');
+            })
+            .catch(err => {
+              throw err;
+            });
         } else {
-          console.log('Wrong password');
+
           res.redirect('/login');
         }
       }
       res.end();
     })
     .catch(err => {
+      throw err;
+    });
+});
+
+app.get('/logout', (req, res) => {
+  return models.Sessions.delete({hash: req.cookies.shortlyid})
+    .then(() => {
+      res.clearCookie('shortlyid');
+      res.redirect('/login');
+      res.end();
+    }
+    )
+    .catch(err => {
+      // console.log(err);
       throw err;
     });
 });
